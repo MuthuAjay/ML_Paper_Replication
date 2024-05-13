@@ -148,6 +148,8 @@ class VGG16(nn.Module):
             nn.Linear(in_features=4096, out_features=output_shape)
         )
 
+        self._init_weights()
+
     def forward(self,
                 x: torch.Tensor) -> torch.Tensor:
         x = self.conv_block_5(
@@ -162,3 +164,31 @@ class VGG16(nn.Module):
         x = torch.flatten(x, 1)
         x = self.classifier(x)
         return x
+
+    def _init_weights(self):
+        blocks = [self.conv_block_1,
+                  self.conv_block_2,
+                  self.conv_block_3,
+                  self.conv_block_4,
+                  self.conv_block_5,
+                  self.classifier]
+        for block in blocks:
+            for layer in block.modules():
+                if isinstance(layer, nn.Conv2d):
+                    nn.init.kaiming_normal_(layer.weight,
+                                            mode='fan_out',
+                                            nonlinearity='relu')
+                    # if layer.bias is not None:  # Use it if there are no batch normalisation or layer Norm
+                    #     nn.init.constant_(layer.bias,0)
+                elif isinstance(layer, nn.Linear):
+                    nn.init.normal_(layer.weight,
+                                    mean=0,
+                                    std=0.001)
+                    nn.init.constant_(layer.bias,
+                                      val=0)
+
+
+if __name__ == "__main__":
+    model = VGG16(input_shape=3,
+                  output_shape=100)
+    print(model)
