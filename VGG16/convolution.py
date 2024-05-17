@@ -1,6 +1,6 @@
 from typing import Tuple
 import torch
-import torch.nn.functional as F
+from torch import nn
 from itertools import repeat
 
 
@@ -31,9 +31,9 @@ class Conv2d:
         self.dilation = (self.dilation, self.dilation)
 
     def initialise_weights(self):
-        return (torch.randn(self.out_channels, self.in_channels // self.groups,
-                            *self.kernel_size),
-                torch.zeros(self.out_channels))
+        return (nn.Parameter(torch.randn(self.out_channels, self.in_channels // self.groups,
+                            *self.kernel_size)),
+                nn.Parameter(torch.zeros(self.out_channels)))
 
     def add_padding(self,
                     x: torch.Tensor,
