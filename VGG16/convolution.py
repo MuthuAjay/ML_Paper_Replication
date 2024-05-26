@@ -32,7 +32,7 @@ class Conv2d:
 
     def initialise_weights(self):
         return (nn.Parameter(torch.randn(self.out_channels, self.in_channels // self.groups,
-                            *self.kernel_size)),
+                                         *self.kernel_size)),
                 nn.Parameter(torch.zeros(self.out_channels)))
 
     def add_padding(self,
@@ -90,7 +90,10 @@ class Conv2d:
 
 
 # Example usage
-x = torch.randn(3, 3, 5, 5)  # Batch size of 1, 3 input channels, 5x5 image
+x = torch.randn(32, 3, 5, 5)  # Batch size of 1, 3 input channels, 5x5 image
 conv = Conv2d(in_channels=3, out_channels=10, kernel_size=3, stride=1, padding=1)
 output = conv(x)
+conv2 = Conv2d(in_channels=10, out_channels=20, kernel_size=3, stride=1, padding=1)
+output = conv2(output)
+
 print(output.shape)  # Should be (1, 1, 5, 5)
