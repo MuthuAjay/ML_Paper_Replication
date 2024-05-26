@@ -113,6 +113,7 @@ class Conv2d:
 # Max Pool Layer
 class MaxPoolLayer:
     def __init__(self, size):
+        self.last_input = None
         self.size = size
 
     def forward(self, x):
@@ -124,14 +125,15 @@ class MaxPoolLayer:
 
         for i in range(output_height):
             for j in range(output_width):
-                region = x[:, :, i * self.size:(i + 1) * self.size, j * self.size:(j + 1) * self.size]
-                print(region.shape)
+                region = x[:, :, i * self.size:(i + 1) * self.size, j * self.size:(j + 1) * self.size].clone()
+                # print(region.shape)
                 output[:, :, i, j] = torch.max(region.view(batch_size, channels, -1), dim=2)[0]
 
         return output
 
     def backward(self, d_L_d_out):
         d_L_d_input = torch.zeros_like(self.last_input)
+        print(d_L_d_out.shape)
 
         for i in range(d_L_d_out.shape[2]):
             for j in range(d_L_d_out.shape[3]):
@@ -179,6 +181,7 @@ class CNN:
     def forward(self, x):
         x = self.conv(x)
         x = relu(x)
+        print(x.shape)
         x = self.pool.forward(x)
         x = self.fc.forward(x)
         x = relu(x)
@@ -194,6 +197,7 @@ class CNN:
 
         grad = self.output.backward(grad, lr)
         grad = relu_derivative(self.fc.backward(grad, lr))
+        print(grad)
         grad = self.pool.backward(grad)
         grad = relu_derivative(self.conv.backward(grad, lr))
 
