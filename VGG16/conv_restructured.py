@@ -18,6 +18,19 @@ class Relu:
         return []
 
 
+class Softmax:
+
+    def __call__(self,
+                 X: torch.Tensor,
+                 dim: int):
+        X = X - torch.max(X, dim=1, keepdims=True).values
+        sof = torch.exp(X) / torch.sum(torch.exp(X), dim=dim, keepdims=True)
+        return sof
+
+    def parameters(self):
+        return []
+
+
 class CrossEntropyLoss:
 
     def __call__(self,
@@ -34,7 +47,7 @@ class CrossEntropyLoss:
                  ):
         n_samples = y_pred.shape[0]
         softmax = Softmax()
-        grad: torch.Tensor | torch.tensor = softmax(y_pred, dim=1)
+        grad = softmax(y_pred, dim=1)
         grad[range(n_samples), y_true] -= 1
         grad = grad / n_samples
         return grad
@@ -42,24 +55,11 @@ class CrossEntropyLoss:
     def paramerters(self):
         return []
 
-
-class Softmax:
-
-    def __call__(self,
-                 X: torch.Tensor,
-                 dim: int):
-        X = X - torch.max(X, dim=1, keepdims=True).values
-        sof = torch.exp(X) / torch.sum(torch.exp(X), dim=dim, keepdims=True)
-
-    def parameters(self):
-        return []
-
-
 class OptimizerSG:
 
     def __init__(self,
-                 params: Optional[List],
-                 lr: float = 0.1):
+                params: Optional[List],
+                lr : float = 0.1):
         self.params = params
         self.lr = lr
 
@@ -85,6 +85,21 @@ class Flatten:
     def parameters(self):
         return []
 
+class Sequential:
+    def __init__(self,
+                layers: List):
+        self.layers = layers
+
+    def __call__(self,
+                X: torch.Tensor):
+        for layer in self.layers:
+            X = layer(X)
+        self.out = X
+        return self.out
+
+    def parameters(self):
+        return [p for layer in self.layers for p in layer.parameters()]
+
 
 class MaxPool2d:
 
@@ -101,6 +116,7 @@ class MaxPool2d:
         if isinstance(stride, int) else (2, 2))
         self.kh, self.kw = self.kernel_size
         self.sh, self.sw = self.stride
+        self.padded_height, self.padded_width = None, None
 
     def prepare_submatrix(self, X: torch.Tensor):
         B, C, ih, iw = X.shape
@@ -109,21 +125,22 @@ class MaxPool2d:
         subM = X.unfold(2, self.kh, self.sh).unfold(3, self.kw, self.sw)
         return subM
 
-    def forward(self, X: torch.Tensor):
+    def __call__(self, X: torch.Tensor):
         self.X = X
         subM = self.prepare_submatrix(X)
         return subM.max(dim=-1).values.max(dim=-1).values
 
-    def add_padding(self,
-                    X: torch.Tensor,
-                    padding: int):
+    def add_padding(self, x: torch.Tensor, padding: int):
         padding = tuple(repeat(padding, 4))
-        batch_size, in_channels, original_height, original_width = X.size()
+        batch_size, in_channels, original_height, original_width = x.size()
         padded_height = original_height + padding[0] + padding[1]
         padded_width = original_width + padding[2] + padding[3]
 
-        padded_x = torch.zeros((batch_size, in_channels, padded_height, padded_width), dtype=X.dtype)
-        padded_x[:, :, padding[0]:padding[0] + original_height, padding[2]:padding[2] + original_width] = X
+        if (self.padded_height and self.padded_width) is None:
+            self.padded_height, self.padded_width = padded_height, padded_width
+
+        padded_x = torch.zeros((batch_size, in_channels, padded_height, padded_width), dtype=x.dtype)
+        padded_x[:, :, padding[0]:padding[0] + original_height, padding[2]:padding[2] + original_width] = x
         return padded_x
 
     def prepare_mask(self,
@@ -155,7 +172,29 @@ class MaxPool2d:
         dXp = torch.as_strided(dA, Xp.shape, strides)
         return dXp
 
-    def parameters(Self):
+    def maxpool_backprop(self,
+                         dZ: torch.Tensor,
+                         X: torch.Tensor):
+        Xp = self.add_padding(X, self.kernel_size[0])
+        subM = self.prepare_submatrix(Xp)
+        B, C, oh, ow, kh, kw = subM.shape
+        B, C, ih, iw = Xp.shape
+        mask = self.prepare_mask(subM, kh, kw)
+        dXp = self.mask_dXp(mask, Xp, dZ, kh, kw)
+        return dXp
+
+    def padding_backward(self,
+                         dXp: torch.Tensor):
+        B, C, ih, iw = self.X.shape
+        dX = dXp[:, :, self.padded_height:ih, self.padded_width:iw]
+        return dX
+
+    def backward(self,
+                 dZ: torch.Tensor):
+        dXp = self.maxpool_backprop(dZ, self.X)
+        dX = self.padding_backward(dXp)
+
+    def parameters(self):
         return []
 
 
@@ -175,12 +214,12 @@ class Linear:
             self.out += self.bias
         return self.out
 
-    def backward(self, d_L_d_out, lr):
+    def backward(self, d_L_d_out):
         # d_L_d_weights = torch.matmul(self.last_input.t(), d_L_d_out)
 
         d_L_d_weights = self.last_input.T @ d_L_d_out
         d_L_d_biases = torch.sum(d_L_d_out, dim=0)
-        d_L_d_input = d_L_d_out @ self.weights.T
+        d_L_d_input = d_L_d_out @ self.weight.T
 
         return d_L_d_input
 
@@ -208,6 +247,7 @@ class Conv2d:
         self._check_parameters()
         self._n_tuple()
         self.weights, self.bias = self.initialise_weights()
+        self.padded_height, self.padded_width = None, None
 
     def _n_tuple(self):
         self.kernel_size = (self.kernel_size, self.kernel_size)
@@ -252,7 +292,7 @@ class Conv2d:
         if self.padding[0] > 0 or self.padding[1] > 0:
             x = self.add_padding(x, self.padding[0])
 
-        out = torch.zeros(batch_size, self.out_channels, out_height, out_width)
+        self.out = torch.zeros(batch_size, self.out_channels, out_height, out_width)
 
         for h in range(out_height):
             for w in range(out_width):
@@ -262,14 +302,14 @@ class Conv2d:
                 w_end = w_start + self.kernel_size[1]
                 receptive_field = x[:, :, h_start:h_end, w_start:w_end]
 
-                out[:, :, h, w] = torch.sum(
+                self.out[:, :, h, w] = torch.sum(
                     receptive_field.unsqueeze(1) * self.weights.view(1, self.out_channels,
                                                                      self.in_channels // self.groups,
                                                                      *self.kernel_size),
                     dim=(2, 3, 4)
                 ) + self.bias.view(1, self.out_channels)
 
-        return out
+        return self.out
 
     def prepare_subMatrix(self, X, Kh, Kw, s):
         B, C, ih, iw = X.shape
@@ -350,3 +390,42 @@ class Conv2d:
 
     def parameters(self):
         return [self.weights] + ([] if self.bias is None else [self.bias])
+
+
+if __name__ == "__main__":
+    model = Sequential([
+        Conv2d(in_channels=3, out_channels=10, kernel_size=3, stride=1, padding=1),
+        Relu(),
+        Conv2d(in_channels=10, out_channels=10, kernel_size=3, stride=1, padding=1),
+        Relu(),
+        MaxPool2d(2, 2),
+    ])
+    classifier = Sequential([
+        Flatten(),
+        Linear(fan_in=250,
+               fan_out=3)
+    ])
+
+    # parameter init
+    with torch.no_grad():
+        classifier.layers[-1].weight *= 0.1
+
+    parameters = model.parameters() + classifier.parameters()
+    print(sum(p.nelement() for p in parameters))  # number of parameters in total
+    for p in parameters:
+        p.requires_grad = True
+
+    y = torch.randint(0, 3, (10,))
+    print(y)
+    x = classifier(model(torch.randn(10, 3, 10, 10)))
+    print(x.shape)
+
+    loss = CrossEntropyLoss()
+    loss(x, y)
+
+    dl = loss.backward(x, y)
+    dlin = classifier.layers[-1].backward(dl)
+    df = classifier.layers[-2].backward(dlin)
+    print(df.shape)
+
+    dmx = model.layers[-1].backward(df)
