@@ -159,6 +159,35 @@ class MaxPool2d:
         return []
 
 
+class Linear:
+    def __init__(self,
+                 fan_in: int,
+                 fan_out: int,
+                 bias=True):
+        self.weight = torch.randn((fan_in, fan_out)) // fan_in ** 0.5
+        self.bias = torch.randn(fan_out) if bias else None
+
+    def __call__(self,
+                 X: torch.Tensor):
+        self.last_input = X
+        self.out = X @ self.weight
+        if self.bias is not None:
+            self.out += self.bias
+        return self.out
+
+    def backward(self, d_L_d_out, lr):
+        # d_L_d_weights = torch.matmul(self.last_input.t(), d_L_d_out)
+
+        d_L_d_weights = self.last_input.T @ d_L_d_out
+        d_L_d_biases = torch.sum(d_L_d_out, dim=0)
+        d_L_d_input = d_L_d_out @ self.weights.T
+
+        return d_L_d_input
+
+    def parameters(self):
+        return [self.weight] + ([] if self.bias is None else [self.bias])
+
+
 # Custom Conv2d Layer
 class Conv2d:
     def __init__(self,
