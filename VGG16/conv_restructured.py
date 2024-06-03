@@ -163,6 +163,8 @@ class MaxPool2d:
                  dz: torch.Tensor,
                  kh: int,
                  kw: int):
+        print('dZ shape',dz.shape, 'mask shape: ', mask.shape)
+        print(kh, kw)
         dA = torch.einsum('i,ijk->ijk',
                           dz.view(-1),
                           mask.view(-1, kh, kw)).view(mask.shape)
@@ -191,8 +193,11 @@ class MaxPool2d:
 
     def backward(self,
                  dZ: torch.Tensor):
+        print('X shape',self.X.shape)
         dXp = self.maxpool_backprop(dZ, self.X)
         dX = self.padding_backward(dXp)
+
+        return  dX
 
     def parameters(self):
         return []
@@ -402,7 +407,7 @@ if __name__ == "__main__":
     ])
     classifier = Sequential([
         Flatten(),
-        Linear(fan_in=250,
+        Linear(fan_in=1960,
                fan_out=3)
     ])
 
@@ -417,8 +422,8 @@ if __name__ == "__main__":
 
     y = torch.randint(0, 3, (10,))
     print(y)
-    x = classifier(model(torch.randn(10, 3, 10, 10)))
-    print(x.shape)
+    x = classifier(model(torch.randn(1, 1, 28, 28)))
+    print('input shape : ',x.shape)
 
     loss = CrossEntropyLoss()
     loss(x, y)
@@ -426,6 +431,6 @@ if __name__ == "__main__":
     dl = loss.backward(x, y)
     dlin = classifier.layers[-1].backward(dl)
     df = classifier.layers[-2].backward(dlin)
-    print(df.shape)
+    print('df.shape', df.shape)
 
     dmx = model.layers[-1].backward(df)
