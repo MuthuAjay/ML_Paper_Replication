@@ -12,7 +12,7 @@ class Relu:
 
     def backward(self,
                  dZ: torch.Tensor):
-        return (dZ > 0).float
+        return (dZ > 0).float()
 
     def parameters(self):
         return []
@@ -31,35 +31,11 @@ class Softmax:
         return []
 
 
-class CrossEntropyLoss:
-
-    def __call__(self,
-                 y_pred: torch.Tensor,
-                 y_true: torch.Tensor
-                 ):
-        n_samples = y_pred.shape[0]
-        log_likelihood = -torch.log(y_pred[range(n_samples), y_true])
-        return torch.sum(log_likelihood) / n_samples
-
-    def backward(self,
-                 y_pred: torch.Tensor,
-                 y_true: torch.Tensor
-                 ):
-        n_samples = y_pred.shape[0]
-        softmax = Softmax()
-        grad = softmax(y_pred, dim=1)
-        grad[range(n_samples), y_true] -= 1
-        grad = grad / n_samples
-        return grad
-
-    def paramerters(self):
-        return []
-
 class OptimizerSG:
 
     def __init__(self,
-                params: Optional[List],
-                lr : float = 0.1):
+                 params: Optional[List],
+                 lr: float = 0.1):
         self.params = params
         self.lr = lr
 
@@ -85,13 +61,14 @@ class Flatten:
     def parameters(self):
         return []
 
+
 class Sequential:
     def __init__(self,
-                layers: List):
+                 layers: List):
         self.layers = layers
 
     def __call__(self,
-                X: torch.Tensor):
+                 X: torch.Tensor):
         for layer in self.layers:
             X = layer(X)
         self.out = X
@@ -99,108 +76,6 @@ class Sequential:
 
     def parameters(self):
         return [p for layer in self.layers for p in layer.parameters()]
-
-
-class MaxPool2d:
-
-    def __init__(self,
-                 kernel_size: int | Tuple,
-                 stride: int | Tuple):
-        self.kernel_size = (kernel_size
-                            if isinstance(kernel_size, tuple) and len(kernel_size) == 2
-                            else (kernel_size, kernel_size)
-        if isinstance(kernel_size, int) else (2, 2))
-        self.stride = (stride
-                       if isinstance(stride, tuple) and len(stride) == 2
-                       else (stride, stride)
-        if isinstance(stride, int) else (2, 2))
-        self.kh, self.kw = self.kernel_size
-        self.sh, self.sw = self.stride
-        self.padded_height, self.padded_width = None, None
-
-    def prepare_submatrix(self, X: torch.Tensor):
-        B, C, ih, iw = X.shape
-        oh = (ih - self.kh) // self.sh + 1
-        ow = (iw - self.kw) // self.sw + 1
-        subM = X.unfold(2, self.kh, self.sh).unfold(3, self.kw, self.sw)
-        return subM
-
-    def __call__(self, X: torch.Tensor):
-        self.X = X
-        subM = self.prepare_submatrix(X)
-        return subM.max(dim=-1).values.max(dim=-1).values
-
-    def add_padding(self, x: torch.Tensor, padding: int):
-        padding = tuple(repeat(padding, 4))
-        batch_size, in_channels, original_height, original_width = x.size()
-        padded_height = original_height + padding[0] + padding[1]
-        padded_width = original_width + padding[2] + padding[3]
-
-        if (self.padded_height and self.padded_width) is None:
-            self.padded_height, self.padded_width = padded_height, padded_width
-
-        padded_x = torch.zeros((batch_size, in_channels, padded_height, padded_width), dtype=x.dtype)
-        padded_x[:, :, padding[0]:padding[0] + original_height, padding[2]:padding[2] + original_width] = x
-        return padded_x
-
-    def prepare_mask(self,
-                     subM: torch.Tensor,
-                     kh: int,
-                     kw: int
-                     ):
-        B, C, oh, ow, kh, kw = subM.shape
-        print(torch.reshape(subM, (-1, kh * kw)))
-        # a = subM.view(-1, kh * kw)
-        a = torch.reshape(subM, (-1, kh * kw))
-        idx = torch.argmax(a, dim=1)
-        b = torch.zeros_like(a)
-        b[torch.arange(b.shape[0]), idx] = 1
-        mask = b.view(B, C, oh, ow, kh, kw)
-        return mask
-
-    def mask_dXp(self, mask: torch.Tensor,
-                 Xp: torch.Tensor,
-                 dz: torch.Tensor,
-                 kh: int,
-                 kw: int):
-        print('dZ shape',dz.shape, 'mask shape: ', mask.shape)
-        print(kh, kw)
-        dA = torch.einsum('i,ijk->ijk',
-                          dz.view(-1),
-                          mask.view(-1, kh, kw)).view(mask.shape)
-        B, C, ih, iw = Xp.shape
-        strides = (C * ih * iw, ih * iw, iw, 1)
-        strides = tuple(i * Xp.element_size() for i in strides)
-        dXp = torch.as_strided(dA, Xp.shape, strides)
-        return dXp
-
-    def maxpool_backprop(self,
-                         dZ: torch.Tensor,
-                         X: torch.Tensor):
-        Xp = self.add_padding(X, self.kernel_size[0])
-        subM = self.prepare_submatrix(Xp)
-        B, C, oh, ow, kh, kw = subM.shape
-        B, C, ih, iw = Xp.shape
-        mask = self.prepare_mask(subM, kh, kw)
-        dXp = self.mask_dXp(mask, Xp, dZ, kh, kw)
-        return dXp
-
-    def padding_backward(self,
-                         dXp: torch.Tensor):
-        B, C, ih, iw = self.X.shape
-        dX = dXp[:, :, self.padded_height:ih, self.padded_width:iw]
-        return dX
-
-    def backward(self,
-                 dZ: torch.Tensor):
-        print('X shape',self.X.shape)
-        dXp = self.maxpool_backprop(dZ, self.X)
-        dX = self.padding_backward(dXp)
-
-        return  dX
-
-    def parameters(self):
-        return []
 
 
 class Linear:
@@ -232,37 +107,56 @@ class Linear:
         return [self.weight] + ([] if self.bias is None else [self.bias])
 
 
-# Custom Conv2d Layer
-class Conv2d:
-    def __init__(self,
-                 in_channels: int,
-                 out_channels: int,
-                 kernel_size: int,
-                 stride: int = 1,
-                 padding: int = 0,
-                 dilation: int = 1,
-                 groups: int = 1):
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        self.dilation = dilation
-        self.groups = groups
-        self._check_parameters()
-        self._n_tuple()
-        self.weights, self.bias = self.initialise_weights()
+class CrossEntropyLoss:
+
+    def __call__(self,
+                 y_pred: torch.Tensor,
+                 y_true: torch.Tensor
+                 ):
+        n_samples = y_pred.shape[0]
+        log_likelihood = -torch.log(y_pred[range(n_samples), y_true])
+        return torch.sum(log_likelihood) / n_samples
+
+    def backward(self,
+                 y_pred: torch.Tensor,
+                 y_true: torch.Tensor
+                 ):
+        n_samples = y_pred.shape[0]
+        softmax = Softmax()
+        grad = softmax(y_pred, dim=1)
+        grad[range(n_samples), y_true] -= 1
+        grad = grad / n_samples
+        return grad
+
+    def paramerters(self):
+        return []
+
+
+import torch
+from itertools import repeat
+from typing import Tuple
+
+
+class MaxPool2d:
+
+    def __init__(self, kernel_size: int | Tuple[int, int], stride: int | Tuple[int, int]):
+        self.kernel_size = tuple(kernel_size) if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
+        self.stride = tuple(stride) if isinstance(stride, tuple) else (stride, stride)
+        self.kh, self.kw = self.kernel_size
+        self.sh, self.sw = self.stride
         self.padded_height, self.padded_width = None, None
 
-    def _n_tuple(self):
-        self.kernel_size = (self.kernel_size, self.kernel_size)
-        self.stride = (self.stride, self.stride)
-        self.padding = (self.padding, self.padding)
-        self.dilation = (self.dilation, self.dilation)
+    def prepare_submatrix(self, X: torch.Tensor):
+        B, C, ih, iw = X.shape
+        oh = (ih - self.kh) // self.sh + 1
+        ow = (iw - self.kw) // self.sw + 1
+        subM = X.unfold(2, self.kh, self.sh).unfold(3, self.kw, self.sw)
+        return subM
 
-    def initialise_weights(self):
-        return (torch.randn(self.out_channels, self.in_channels // self.groups, *self.kernel_size, requires_grad=True),
-                torch.zeros(self.out_channels, requires_grad=True))
+    def __call__(self, X: torch.Tensor):
+        self.X = X
+        subM = self.prepare_submatrix(X)
+        return subM.max(dim=-1).values.max(dim=-1).values
 
     def add_padding(self, x: torch.Tensor, padding: int):
         padding = tuple(repeat(padding, 4))
@@ -277,46 +171,169 @@ class Conv2d:
         padded_x[:, :, padding[0]:padding[0] + original_height, padding[2]:padding[2] + original_width] = x
         return padded_x
 
-    def _check_parameters(self):
-        if self.groups <= 0:
-            raise ValueError('groups must be a positive integer')
-        if self.in_channels % self.groups != 0:
-            raise ValueError('in_channels should be divisible by groups')
-        if self.out_channels % self.groups != 0:
-            raise ValueError('out_channels should be divisible by groups')
+    def prepare_mask(self, subM: torch.Tensor):
+        B, C, oh, ow, kh, kw = subM.shape
+        a = torch.reshape(subM, (-1, kh * kw))
+        idx = torch.argmax(a, dim=1)
+        b = torch.zeros_like(a)
+        b[torch.arange(b.shape[0]), idx] = 1
+        mask = b.view(B, C, oh, ow, kh, kw)
+        return mask
 
-    def __call__(self, x: torch.Tensor):
-        self.X = x
-        self.ih, self.iw = self.X.shape[-2], self.X.shape[-1]
-        batch_size, in_channels, in_height, in_width = x.size()
-        out_height = (in_height + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // \
-                     self.stride[0] + 1
-        out_width = (in_width + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[
-            1] + 1
+    def mask_dXp(self, mask: torch.Tensor, dz: torch.Tensor):
+        dz_expanded = dz.unsqueeze(-1).unsqueeze(-1).expand_as(mask)
+        dXp = dz_expanded * mask
+        return dXp
 
-        if self.padding[0] > 0 or self.padding[1] > 0:
-            x = self.add_padding(x, self.padding[0])
+    def maxpool_backprop(self, dZ: torch.Tensor, X: torch.Tensor):
+        Xp = self.add_padding(X, self.kernel_size[0])
+        subM = self.prepare_submatrix(Xp)
+        mask = self.prepare_mask(subM)
+        dXp = self.mask_dXp(mask, dZ)
+        return dXp
 
-        self.out = torch.zeros(batch_size, self.out_channels, out_height, out_width)
+    def padding_backward(self, dXp: torch.Tensor):
+        B, C, ih, iw = self.X.shape
+        dX = dXp[:, :, self.padded_height:ih, self.padded_width:iw]
+        return dX
 
-        for h in range(out_height):
-            for w in range(out_width):
-                h_start = h * self.stride[0]
-                h_end = h_start + self.kernel_size[0]
-                w_start = w * self.stride[1]
-                w_end = w_start + self.kernel_size[1]
-                receptive_field = x[:, :, h_start:h_end, w_start:w_end]
+    def backward(self, dL_dout):
+        Batch, num_channels, input_height, input_width = self.X.shape
+        dL_dinput = torch.zeros_like(self.X)
+        output_height = (input_height - self.kh) // self.sh + 1
+        output_width = (input_width - self.kw) // self.sw + 1
 
-                self.out[:, :, h, w] = torch.sum(
-                    receptive_field.unsqueeze(1) * self.weights.view(1, self.out_channels,
-                                                                     self.in_channels // self.groups,
-                                                                     *self.kernel_size),
-                    dim=(2, 3, 4)
-                ) + self.bias.view(1, self.out_channels)
+        # Extract patches from the input tensor
+        subM = self.prepare_submatrix(self.X)
 
-        return self.out
+        # Create the mask for the max pooling operation
+        mask = self.prepare_mask(subM)
 
-    def prepare_subMatrix(self, X, Kh, Kw, s):
+        # Expand dL_dout to match the shape of mask and perform element-wise multiplication
+        dL_dout_expanded = dL_dout.unsqueeze(-1).unsqueeze(-1).expand_as(mask)
+        dL_dinput_unfolded = dL_dout_expanded * mask
+
+        # Combine the unfolded gradients to form the final gradient
+        dL_dinput = dL_dinput_unfolded.contiguous().view(Batch, num_channels, output_height, output_width, self.kh,
+                                                         self.kw)
+        dL_dinput = dL_dinput.permute(0, 1, 2, 4, 3, 5).contiguous().view(Batch, num_channels, output_height * self.kh,
+                                                                          output_width * self.kw)
+
+        # Reduce the overlapping areas by summing them
+        result = torch.zeros_like(self.X)
+        for i in range(self.kh):
+            for j in range(self.kw):
+                result[:, :, i::self.kh, j::self.kw] += dL_dinput[:, :, i::self.kh, j::self.kw]
+
+        return result
+
+    def parameters(self):
+        return []
+
+
+import torch
+from typing import Tuple
+
+
+class Conv2d:
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: int,
+                 stride: int = 1,
+                 padding: int = 0,
+                 dilation: int = 1,
+                 groups: int = 1,
+                 bias: bool = True) -> None:
+        self.output_shape = None
+        self.Ow = None
+        self.Oh = None
+        self.iw = None
+        self.ih = None
+        self.C = None
+        self.B = None
+        self.input_shape = None
+        self.input_shape_x = None
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
+        self.kh, self.kw = self.kernel_size
+        self.stride = stride if isinstance(stride, tuple) else (stride, stride)
+        self.sh, self.sw = self.stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+        self.weights, self.bias = self.initialise_parameters()
+
+    def initialise_parameters(self, bias: bool = True):
+        # return (torch.randn(self.out_channels, self.in_channels // self.groups, *self.kernel_size, requires_grad=True),
+        #         torch.zeros(self.out_channels,self.Oh, self.Ow, requires_grad=True) if not bias else torch.randn(self.out_channels,self.Oh, self.Ow, requires_grad=True))
+        return (torch.randn(self.out_channels, self.in_channels // self.groups, *self.kernel_size, requires_grad=True),
+                torch.zeros(self.out_channels, requires_grad=True) if not bias else torch.randn(self.out_channels,
+                                                                                                requires_grad=True))
+
+    def get_padding_dimensions(self,
+                               input_shape: torch.Tensor.size,
+                               kernel_size: Tuple,
+                               s=(1, 1),
+                               padding: int | Tuple = None):
+        if len(input_shape) == 4:
+            B, C, ih, iw = input_shape
+        if len(input_shape) == 3:
+            C, ih, iw = input_shape
+
+        kh, kw = kernel_size
+        sh, sw = s
+        if padding is None:
+            p = self.padding
+        else:
+            p = padding
+
+        if isinstance(p, int):
+            pt, pb, pl, pr = p, p, p, p
+        elif isinstance(p, tuple):
+            ph, pw = p
+            pt, pb = ph // 2, (ph + 1) // 2
+            pl, pr = pw // 2, (pw + 1) // 2
+        elif p == 'valid':
+            pt, pb = 0, 0
+            pl, pr = 0, 0
+
+        elif p == 'same':
+            ph = (sh - 1) * ih + kh - sh
+            pw = (sw - 1) * iw + kw - sw
+
+            pt, pb = ph // 2, (ph + 1) // 2
+            pl, pr = pw // 2, (pw + 1) // 2
+        else:
+            raise ValueError(
+                "Incorrect padding type. Allowed types are only 'same', 'valid', an integer or a tuple of length 2.")
+
+        if len(input_shape) == 4:
+            output_shape = (B, C, ih + pt + pb, iw + pl + pr)
+        elif len(input_shape) == 4:
+            output_shape = (C, ih + pt + pb + iw + pl + pr)
+
+        return output_shape, (pt, pb, pl, pr)
+
+    def get_dimensions(self, input_shape: torch.Tensor):
+        self.input_shape_x = input_shape.shape
+        self.input_shape, _ = self.get_padding_dimensions(self.input_shape_x, self.kernel_size, self.stride)
+
+        if len(self.input_shape) == 3:
+            self.C, self.ih, self.iw = self.input_shape
+        elif len(self.input_shape) == 4:
+            self.B, self.C, self.ih, self.iw = self.input_shape
+
+        self.Oh = (self.ih - self.kh) // self.sh + 1
+        self.Ow = (self.iw - self.kw) // self.sw + 1
+
+        if len(self.input_shape) == 3:
+            self.output_shape = (self.out_channels, self.Oh, self.Ow)
+        elif len(self.input_shape) == 4:
+            self.output_shape = (self.B, self.out_channels, self.Oh, self.Ow)
+
+    def prepare_subMatrix(self, X: torch.Tensor, Kh: int, Kw: int, s):
         B, C, ih, iw = X.shape
         sh, sw = s
 
@@ -325,26 +342,14 @@ class Conv2d:
 
         strides = (C * ih * iw, iw * ih, iw * sh, sw, iw, 1)
         subM = torch.as_strided(X,
-                                shape=(B, C, Oh, Ow, Kh, Kw),
-                                strides=strides
-                                )
+                                size=(B, C, Oh, Ow, Kh, Kw),
+                                stride=strides)
         return subM
 
-    def padding_backward(self,
-                         dXp: torch.Tensor):
-
-        B, C, ih, iw = self.X.shape
-        dX = dXp[:, :, self.padded_height:ih, self.padded_width:iw]
-        return dX
-
-    def convolve(self, X: torch.Tensor,
-                 K: torch.Tensor,
-                 s: Tuple = (1, 1),
-                 mode: str = 'back'):
-
+    def convolve(self, X: torch.Tensor, K: torch.Tensor, s: Tuple = (1, 1), mode: str = 'back'):
         F, Kc, Kh, Kw = K.shape
         subM = self.prepare_subMatrix(X, Kh, Kw, s)
-
+        print(F, Kc, Kh, Kw)
         if mode == 'front':
             return torch.einsum('fckl,mcijkl->mfij', K, subM)
         elif mode == 'back':
@@ -352,44 +357,96 @@ class Conv2d:
         elif mode == 'param':
             return torch.einsum('mfkl,mcijkl->fcij', K, subM)
 
-    def dz_D_dx(self,
-                dZ: torch.Tensor,
-                ih: int,
-                iw: int):
-        _, _, Hd, Wd = dZ.shape
-        ph = ih - Hd + self.kernel_size[0] - 1
-        pw = iw - Wd + self.kernel_size[0] - 1
+    def padding_forward(self, X: torch.Tensor, kernel_size, s=(1, 1), padding=None) -> torch.Tensor:
+        self.input_shape_before_padding = X.shape
+        B, C, ih, iw = self.input_shape_before_padding
+        self.output_shape_padded, (self.pt, self.pb, self.pl, self.pr) = self.get_padding_dimensions(
+            self.input_shape_before_padding, kernel_size, s, padding=padding)
 
-        dZ_Dp = self.add_padding(dZ, ph)
+        zeros_r = torch.zeros((B, C, ih, self.pr), dtype=X.dtype, device=X.device)
+        zeros_l = torch.zeros((B, C, iw, self.pl), dtype=X.dtype, device=X.device)
+        zeros_t = torch.zeros((B, C, self.pt, iw + self.pl + self.pr), dtype=X.dtype, device=X.device)
+        zeros_b = torch.zeros((B, C, self.pb, iw + self.pl + self.pr), dtype=X.dtype, device=X.device)
 
-        # Rotate the Kernel by 180 degrees
-        k_rotated = self.weights[:, :, ::-1, ::-1]
+        Xp = torch.concat((X, zeros_r), dim=3)
+        Xp = torch.concat((zeros_l, Xp), dim=3)
+        Xp = torch.concat((zeros_t, Xp), dim=2)
+        Xp = torch.concat((Xp, zeros_b), dim=2)
 
-        # convolve w.r.t k_rotated
-        dXp = self.convolve(dZ_Dp, k_rotated, mode='back')
+        return Xp
 
-        dX = self.padding_backward(dXp)
+    def padding_backward(self, dXp: torch.Tensor):
+        B, C, ih, iw = self.input_shape
+        dX = dXp[:, :, self.pt:self.pt + ih, self.pl:self.pl + iw]
         return dX
 
-    def backward(self,
-                 dZ: torch.Tensor):
-        Xp: torch.Tensor = self.add_padding(self.X, self.padding)
+    def dilate2D(self, X: torch.Tensor, Dr=(1, 1)) -> torch.Tensor:
+        dh, dw = Dr
+        B, C, H, W = X.shape
+
+        if dw > 1:
+            Xd_w = torch.zeros((B, C, H, W + (W - 1) * (dw - 1)), dtype=X.dtype, device=X.device)
+            Xd_w[:, :, :, ::dw] = X
+        else:
+            Xd_w = X
+
+        if dh > 1:
+            Xd_h = torch.zeros((B, C, H + (H - 1) * (dh - 1), Xd_w.shape[-1]), dtype=X.dtype, device=X.device)
+            Xd_h[:, :, ::dh, :] = Xd_w
+        else:
+            Xd_h = Xd_w
+
+        return Xd_h
+
+    def dZ_D_dX(self, dZ_D: torch.Tensor, ih: int, iw: int) -> torch.Tensor:
+        _, _, Hd, Wd = dZ_D.shape
+        ph = ih - Hd + self.kh - 1
+        pw = iw - Wd + self.kw - 1
+
+        dZ_Dp = self.padding_forward(dZ_D, self.kernel_size, self.stride, (ph, pw))
+        k_rotated = self.weights.flip([2, 3])
+        dXp = self.convolve(dZ_Dp, k_rotated, mode='back')
+        dX = self.padding_backward(dXp)
+
+        return dX
+
+    def __call__(self, X: torch.Tensor) -> torch.Tensor:
+        self.X = X
+        self.get_dimensions(X)
+        print(f"Input shape: {X.shape}")
+        Xp = self.padding_forward(X, self.kernel_size, self.stride, self.padding)
+        print(f"Padded input shape: {Xp.shape}")
+        self.Z = self.convolve(Xp, self.weights, self.stride, mode='front')
+        print(f"Convolved output shape: {self.Z.shape}")
+
+        print(f"bias shape: {self.bias.shape}")
+
+        if self.bias is not None:
+            print(f"bias shape: {self.bias.unsqueeze(0).shape}")
+            return self.Z + self.bias.view(1, -1, 1, 1)  # sum should be done on the last layer
+
+        return self.Z
+
+    def backward(self, dZ: torch.Tensor) -> torch.Tensor:
+        Xp = self.padding_forward(self.X, self.kernel_size, self.stride)
+
         B, C, ih, iw = Xp.shape
 
-        # dZ -> dZ_D_dX
-        dX = self.dz_D_dx(dZ, ih, iw)
+        # Dilate dZ (dZ -> dZ_D)
+        dZ_D = self.dilate2D(dZ, Dr=self.stride)
+        dX = self.dZ_D_dX(dZ_D, ih, iw)
 
-        # gradient dK
-        _, _, Hd, Wd = dZ.shape
-        ph = self.ih - Hd - self.kernel_size[0] + 1
-        pw = self.iw - Wd - self.kernel_size[0] + 1
+        # Gradient K
+        _, _, Hd, Wd = dZ_D.shape
 
-        dZ_Dp = self.add_padding(dZ, padding=ph)
+        ph = self.ih - Hd - self.kh + 1
+        pw = self.iw - Wd - self.kw + 1
 
-        self.dweights = self.convolve(Xp, dZ_Dp, mode='param')
+        dZ_Dp = self.padding_forward(dZ_D, self.kernel_size, self.stride, padding=(ph, pw))
+        self.dK = self.convolve(Xp, dZ_Dp, mode='param')
 
         # gradient db
-        self.dbias = dZ.sum(0)
+        self.db = torch.sum(dZ, dim=0)
 
         return dX
 
@@ -398,16 +455,17 @@ class Conv2d:
 
 
 if __name__ == "__main__":
+    print(torch.cuda.is_available())
     model = Sequential([
-        Conv2d(in_channels=3, out_channels=10, kernel_size=3, stride=1, padding=1),
+        Conv2d(in_channels=3, out_channels=10, kernel_size=3, stride=1, padding=1, dilation=1),
         Relu(),
-        Conv2d(in_channels=10, out_channels=10, kernel_size=3, stride=1, padding=1),
+        Conv2d(in_channels=10, out_channels=10, kernel_size=3, stride=1, padding=1, dilation=1),
         Relu(),
         MaxPool2d(2, 2),
     ])
     classifier = Sequential([
         Flatten(),
-        Linear(fan_in=1960,
+        Linear(fan_in=40960,
                fan_out=3)
     ])
 
@@ -422,8 +480,8 @@ if __name__ == "__main__":
 
     y = torch.randint(0, 3, (10,))
     print(y)
-    x = classifier(model(torch.randn(1, 1, 28, 28)))
-    print('input shape : ',x.shape)
+    x = classifier(model(torch.randn(10, 3, 128, 128)))
+    print('input shape : ', x.shape)
 
     loss = CrossEntropyLoss()
     loss(x, y)
@@ -433,4 +491,17 @@ if __name__ == "__main__":
     df = classifier.layers[-2].backward(dlin)
     print('df.shape', df.shape)
 
-    dmx = model.layers[-1].backward(df)
+    dmp = model.layers[-1].backward(df)
+    print(dmp.shape)
+
+    dre = model.layers[-2].backward(dmp)
+    print(dre.shape)
+
+    dconv = model.layers[-3].backward(dre)
+    print(dconv.shape)
+
+    drel2 = model.layers[-4].backward(dconv)
+    print(drel2.shape)
+
+    dconv2 = model.layers[-5].backward(drel2)
+    print(dconv2.shape)
