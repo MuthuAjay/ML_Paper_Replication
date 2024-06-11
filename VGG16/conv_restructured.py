@@ -1,6 +1,5 @@
-from itertools import repeat
-
 import torch
+from itertools import repeat
 from typing import Optional, List, Tuple
 
 
@@ -101,7 +100,7 @@ class Linear:
         d_L_d_biases = torch.sum(d_L_d_out, dim=0)
         d_L_d_input = d_L_d_out @ self.weight.T
 
-        return d_L_d_input
+        return d_L_d_input, d_L_d_weights, d_L_d_biases
 
     def parameters(self):
         return [self.weight] + ([] if self.bias is None else [self.bias])
@@ -130,11 +129,6 @@ class CrossEntropyLoss:
 
     def paramerters(self):
         return []
-
-
-import torch
-from itertools import repeat
-from typing import Tuple
 
 
 class MaxPool2d:
@@ -229,10 +223,6 @@ class MaxPool2d:
 
     def parameters(self):
         return []
-
-
-import torch
-from typing import Tuple
 
 
 class Conv2d:
@@ -427,7 +417,7 @@ class Conv2d:
 
         return self.Z
 
-    def backward(self, dZ: torch.Tensor) -> torch.Tensor:
+    def backward(self, dZ: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         Xp = self.padding_forward(self.X, self.kernel_size, self.stride)
 
         B, C, ih, iw = Xp.shape
@@ -446,12 +436,45 @@ class Conv2d:
         self.dK = self.convolve(Xp, dZ_Dp, mode='param')
 
         # gradient db
-        self.db = torch.sum(dZ, dim=0)
+        self.db = torch.sum(dZ, dim=[1,2,3])
+        print('dconv1_b2 shape: ', self.db.shape)
 
-        return dX
+        return dX, self.dK, self.db
 
     def parameters(self):
         return [self.weights] + ([] if self.bias is None else [self.bias])
+
+
+def backward(logits):
+    dlogits = loss.backward(logits,y)
+    d_L_d_input, d_L_d_weights, d_L_d_biases = classifier.layers[-1].backward(dlogits)
+    dflatten = classifier.layers[-2].backward(d_L_d_input)
+
+    # backward pass through maxpool
+    dmaxp2 = model.layers[-1].backward(dflatten)
+    drel2 = model.layers[-2].backward(dmaxp2)
+    dconv2, dconv_w2, dconv_b2 = model.layers[-3].backward(drel2)
+    drel1 = model.layers[-3].backward(dconv2)
+    dconv1, dconv_w1, dconv_b1 = model.layers[-5].backward(drel2)
+
+    grads = [dconv_w1, dconv_b1, dconv_w2, dconv_b2,
+             d_L_d_weights, d_L_d_biases]
+    return grads
+
+
+class Optimizer:
+
+    def __init__(self, optimizer_type: str = None):
+        if optimizer_type is None:
+            self.optimizer_type = 'SGD'
+        else:
+            self.optimizer_type = optimizer_type
+
+    def SGD(self,
+            parameters: torch.Tensor,
+            momentum: int = 0.1,
+            lr: float = 0.1):
+        pass
 
 
 if __name__ == "__main__":
@@ -465,7 +488,7 @@ if __name__ == "__main__":
     ])
     classifier = Sequential([
         Flatten(),
-        Linear(fan_in=40960,
+        Linear(fan_in=1960,
                fan_out=3)
     ])
 
@@ -480,28 +503,18 @@ if __name__ == "__main__":
 
     y = torch.randint(0, 3, (10,))
     print(y)
-    x = classifier(model(torch.randn(10, 3, 128, 128)))
-    print('input shape : ', x.shape)
+    logits = classifier(model(torch.randn(10, 3, 28, 28)))
+    print('output shape : ', logits.shape)
 
     loss = CrossEntropyLoss()
-    loss(x, y)
-
-    dl = loss.backward(x, y)
-    dlin = classifier.layers[-1].backward(dl)
-    df = classifier.layers[-2].backward(dlin)
-    print('df.shape', df.shape)
-
-    dmp = model.layers[-1].backward(df)
-    print(dmp.shape)
-
-    dre = model.layers[-2].backward(dmp)
-    print(dre.shape)
-
-    dconv = model.layers[-3].backward(dre)
-    print(dconv.shape)
-
-    drel2 = model.layers[-4].backward(dconv)
-    print(drel2.shape)
-
-    dconv2 = model.layers[-5].backward(drel2)
-    print(dconv2.shape)
+    loss(logits, y)
+    for p in parameters:
+        p.grad = None
+    grads = backward(logits)
+    print(len(grads) ,'|', len(parameters))
+    i = 0
+    for p, grad in zip(parameters, grads):
+        print(i)
+        print(p.shape , grad.shape)
+        p.data += -(0.1) * grad
+        i += 1
