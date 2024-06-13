@@ -436,7 +436,7 @@ class Conv2d:
         self.dK = self.convolve(Xp, dZ_Dp, mode='param')
 
         # gradient db
-        self.db = torch.sum(dZ, dim=[1,2,3])
+        self.db = torch.sum(dZ, dim=[0,2,3])
         print('dconv1_b2 shape: ', self.db.shape)
 
         return dX, self.dK, self.db
@@ -471,10 +471,13 @@ class Optimizer:
             self.optimizer_type = optimizer_type
 
     def SGD(self,
-            parameters: torch.Tensor,
+            parameters: List[torch.Tensor],
+            grads: List[torch.Tensor],
             momentum: int = 0.1,
             lr: float = 0.1):
-        pass
+        for p, grad in zip(parameters, grads):
+            p.data += -lr * grad
+        return parameters
 
 
 if __name__ == "__main__":
@@ -496,25 +499,32 @@ if __name__ == "__main__":
     with torch.no_grad():
         classifier.layers[-1].weight *= 0.1
 
+    num_epochs = 10
+
     parameters = model.parameters() + classifier.parameters()
     print(sum(p.nelement() for p in parameters))  # number of parameters in total
     for p in parameters:
         p.requires_grad = True
 
     y = torch.randint(0, 3, (10,))
-    print(y)
-    logits = classifier(model(torch.randn(10, 3, 28, 28)))
-    print('output shape : ', logits.shape)
+    x = torch.randn(10, 3, 28, 28)
+    losses = []
+    print(x.shape, y.shape)
 
-    loss = CrossEntropyLoss()
-    loss(logits, y)
-    for p in parameters:
-        p.grad = None
-    grads = backward(logits)
-    print(len(grads) ,'|', len(parameters))
-    i = 0
-    for p, grad in zip(parameters, grads):
-        print(i)
-        print(p.shape , grad.shape)
-        p.data += -(0.1) * grad
-        i += 1
+    for i in range(num_epochs):
+        logits = classifier(model(x))
+        print('output shape : ', logits.shape)
+
+        loss = CrossEntropyLoss()
+        lossi = loss(logits, y)
+        print(lossi, 'loss')
+        for p in parameters:
+            p.grad = None
+        grads = backward(logits)
+        print(len(grads) ,'|', len(parameters))
+
+        optimizer = Optimizer()
+        parameters = optimizer.SGD(parameters=parameters, grads=grads)
+        losses.append(lossi)
+
+    print(losses)
