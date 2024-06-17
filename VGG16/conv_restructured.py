@@ -339,7 +339,6 @@ class Conv2d:
     def convolve(self, X: torch.Tensor, K: torch.Tensor, s: Tuple = (1, 1), mode: str = 'back'):
         F, Kc, Kh, Kw = K.shape
         subM = self.prepare_subMatrix(X, Kh, Kw, s)
-        print(F, Kc, Kh, Kw)
         if mode == 'front':
             return torch.einsum('fckl,mcijkl->mfij', K, subM)
         elif mode == 'back':
@@ -403,16 +402,10 @@ class Conv2d:
     def __call__(self, X: torch.Tensor) -> torch.Tensor:
         self.X = X
         self.get_dimensions(X)
-        print(f"Input shape: {X.shape}")
         Xp = self.padding_forward(X, self.kernel_size, self.stride, self.padding)
-        print(f"Padded input shape: {Xp.shape}")
         self.Z = self.convolve(Xp, self.weights, self.stride, mode='front')
-        print(f"Convolved output shape: {self.Z.shape}")
-
-        print(f"bias shape: {self.bias.shape}")
 
         if self.bias is not None:
-            print(f"bias shape: {self.bias.unsqueeze(0).shape}")
             return self.Z + self.bias.view(1, -1, 1, 1)  # sum should be done on the last layer
 
         return self.Z
@@ -437,7 +430,6 @@ class Conv2d:
 
         # gradient db
         self.db = torch.sum(dZ, dim=[0,2,3])
-        print('dconv1_b2 shape: ', self.db.shape)
 
         return dX, self.dK, self.db
 
@@ -506,25 +498,22 @@ if __name__ == "__main__":
     for p in parameters:
         p.requires_grad = True
 
-    y = torch.randint(0, 3, (10,))
-    x = torch.randn(10, 3, 28, 28)
+    y = torch.randint(0, 3, (32,))
+    x = torch.randn(32, 3, 28, 28)
     losses = []
-    print(x.shape, y.shape)
 
     for i in range(num_epochs):
         logits = classifier(model(x))
-        print('output shape : ', logits.shape)
 
         loss = CrossEntropyLoss()
         lossi = loss(logits, y)
-        print(lossi, 'loss')
         for p in parameters:
             p.grad = None
         grads = backward(logits)
-        print(len(grads) ,'|', len(parameters))
 
         optimizer = Optimizer()
         parameters = optimizer.SGD(parameters=parameters, grads=grads)
         losses.append(lossi)
+        print(lossi.item())
 
     print(losses)
