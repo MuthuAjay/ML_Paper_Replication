@@ -1,6 +1,7 @@
 import torch
 from itertools import repeat
 from typing import Optional, List, Tuple
+from tqdm.auto import tqdm
 
 
 class Relu:
@@ -455,23 +456,6 @@ class Conv2d:
         return [self.weights] + ([] if self.bias is None else [self.bias])
 
 
-def backward(logits):
-    dlogits = loss.backward(logits, y)
-    d_L_d_input, d_L_d_weights, d_L_d_biases = classifier.layers[-1].backward(dlogits)
-    dflatten = classifier.layers[-2].backward(d_L_d_input)
-
-    # backward pass through maxpool
-    dmaxp2 = model.layers[-1].backward(dflatten)
-    drel2 = model.layers[-2].backward(dmaxp2)
-    dconv2, dconv_w2, dconv_b2 = model.layers[-3].backward(drel2)
-    drel1 = model.layers[-3].backward(dconv2)
-    dconv1, dconv_w1, dconv_b1 = model.layers[-5].backward(drel2)
-
-    grads = [dconv_w1, dconv_b1, dconv_w2, dconv_b2,
-             d_L_d_weights, d_L_d_biases]
-    return grads
-
-
 class Optimizer:
 
     def __init__(self, optimizer_type: str = None):
@@ -490,49 +474,72 @@ class Optimizer:
         return parameters
 
 
+def dataset():
+    from torchvision import datasets
+    from torchvision.transforms import ToTensor, Lambda, Compose
+    from torch.utils.data import DataLoader, SubsetRandomSampler
+
+    training_data = datasets.FashionMNIST(
+        root='data',
+        train=True,
+        download=True,
+        transform=Compose([ToTensor()])
+    )
+
+    test_data = datasets.FashionMNIST(
+        root='data',
+        train=False,
+        download=True,
+        transform=Compose([ToTensor()])
+    )
+
+    traindataloader = DataLoader(training_data, batch_size=64, shuffle=False, sampler=SubsetRandomSampler(range(100)))
+    testdataloader = DataLoader(test_data, batch_size=64, shuffle=False, sampler=SubsetRandomSampler(range(20)))
+    return traindataloader, testdataloader
+
+
 if __name__ == "__main__":
+
+    train_dataloader, test_dataloader = dataset()
+    device = 'cpu'
     print(torch.cuda.is_available())
     model = Sequential([
-        Conv2d(in_channels=3, out_channels=10, kernel_size=3, stride=1, padding=1, dilation=1),
+        Conv2d(in_channels=3, out_channels=20, kernel_size=3, stride=1, padding=1, dilation=1),
         Relu(),
-        Conv2d(in_channels=10, out_channels=10, kernel_size=3, stride=1, padding=1, dilation=1),
+        Conv2d(in_channels=20, out_channels=20, kernel_size=3, stride=1, padding=1, dilation=1),
         Relu(),
         MaxPool2d(2, 2),
-    ])
-    classifier = Sequential([
+        Conv2d(in_channels=20, out_channels=20, kernel_size=3, stride=1, padding=1, dilation=1),
+        Relu(),
+        Conv2d(in_channels=20, out_channels=20, kernel_size=3, stride=1, padding=1, dilation=1),
+        Relu(),
+        MaxPool2d(2, 2),
         Flatten(),
-        Linear(fan_in=1960,
-               fan_out=3)
+        Linear(fan_in=980,
+               fan_out=10)
     ])
-
-    # parameter init
-    with torch.no_grad():
-        classifier.layers[-1].weight *= 0.1
-
-    num_epochs = 10
-
-    parameters = model.parameters() + classifier.parameters()
+    loss = CrossEntropyLoss()
+    losses = []
+    parameters = model.parameters()
     print(sum(p.nelement() for p in parameters))  # number of parameters in total
     for p in parameters:
         p.requires_grad = True
 
-    y = torch.randint(0, 3, (32,))
-    x = torch.randn(32, 3, 28, 28)
-    losses = []
+    train_loss, train_acc = 0.0, 0.0
+    for i in tqdm(range(100)):
+        for batch, (X, y) in enumerate(train_dataloader):
+            X, y = X.to(device), y.to(device)
+            y_pred_logits = model(X)
+            lossi = loss(y_pred_logits, y)
+            for p in parameters:
+                p.grad = None
+            grads = model.backward(y_pred_logits)
 
-    for i in range(num_epochs):
-        logits = classifier(model(x))
+            optimizer = Optimizer()
+            parameters = optimizer.SGD(parameters=parameters, grads=grads)
+            losses.append(lossi)
+            print(lossi.item())
 
-        loss = CrossEntropyLoss()
-        lossi = loss(logits, y)
-        for p in parameters:
-            p.grad = None
-        grads = backward(logits)
+        train_loss /= len(train_dataloader)
 
-        optimizer = Optimizer()
-        parameters = optimizer.SGD(parameters=parameters, grads=grads)
-        losses.append(lossi)
-        print(lossi.item())
-
-    print(losses)
-    print(model.layers[0].weights)
+        print(f"Train Loss: {train_loss:.5f} | Train Acc: {train_acc:.5f}")
