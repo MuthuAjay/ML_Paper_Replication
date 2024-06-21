@@ -76,6 +76,24 @@ class Sequential:
     def parameters(self):
         return [p for layer in self.layers for p in layer.parameters()]
 
+    def backward(self, logits):
+        dlogits = loss.backward(logits, y)
+        grads = []
+        for layer in self.layers[::-1]:
+            if layer.__class__.__name__ == 'Conv2d':
+                dlogits, dconv_w, dconv_b = layer.backward(dlogits)
+                grads += [dconv_b, dconv_w]
+            elif layer.__class__.__name__ == 'Relu':
+                dlogits = layer.backward(dlogits)
+            elif layer.__class__.__name__ == 'MaxPool2d':
+                dlogits = layer.backward(dlogits)
+            elif layer.__class__.__name__ == 'Flatten':
+                dlogits = layer.backward(dlogits)
+            elif layer.__class__.__name__ == 'Linear':
+                dlogits, d_L_d_weights, d_L_d_bias = layer.backward(dlogits)
+                grads += [d_L_d_bias, d_L_d_weights]
+        return grads[::-1]
+
 
 class Linear:
     def __init__(self,
@@ -429,7 +447,7 @@ class Conv2d:
         self.dK = self.convolve(Xp, dZ_Dp, mode='param')
 
         # gradient db
-        self.db = torch.sum(dZ, dim=[0,2,3])
+        self.db = torch.sum(dZ, dim=[0, 2, 3])
 
         return dX, self.dK, self.db
 
@@ -438,7 +456,7 @@ class Conv2d:
 
 
 def backward(logits):
-    dlogits = loss.backward(logits,y)
+    dlogits = loss.backward(logits, y)
     d_L_d_input, d_L_d_weights, d_L_d_biases = classifier.layers[-1].backward(dlogits)
     dflatten = classifier.layers[-2].backward(d_L_d_input)
 
@@ -517,3 +535,4 @@ if __name__ == "__main__":
         print(lossi.item())
 
     print(losses)
+    print(model.layers[0].weights)
