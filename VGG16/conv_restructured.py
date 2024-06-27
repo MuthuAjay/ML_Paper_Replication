@@ -8,7 +8,8 @@ class Relu:
 
     def __call__(self,
                  X: torch.Tensor):
-        return torch.clamp(X, min=0)
+        self.out = torch.clamp(X, min=0)
+        return self.out
 
     def backward(self,
                  dZ: torch.Tensor):
@@ -24,8 +25,8 @@ class Softmax:
                  X: torch.Tensor,
                  dim: int):
         X = X - torch.max(X, dim=1, keepdims=True).values
-        sof = torch.exp(X) / torch.sum(torch.exp(X), dim=dim, keepdims=True)
-        return sof
+        self.out = torch.exp(X) / torch.sum(torch.exp(X), dim=dim, keepdims=True)
+        return self.out
 
     def parameters(self):
         return []
@@ -81,18 +82,23 @@ class Sequential:
         dlogits = loss.backward(logits, y)
         grads = []
         for layer in self.layers[::-1]:
-            if layer.__class__.__name__ == 'Conv2d':
+            if isinstance(layer, Conv2d):
                 dlogits, dconv_w, dconv_b = layer.backward(dlogits)
                 grads += [dconv_b, dconv_w]
-            elif layer.__class__.__name__ == 'Relu':
+                layer.weights.grad = dconv_w
+                layer.bias.grad = dconv_b
+            elif isinstance(layer, Relu):
                 dlogits = layer.backward(dlogits)
-            elif layer.__class__.__name__ == 'MaxPool2d':
+                layer.out.grad = dlogits
+            elif isinstance(layer, MaxPool2d):
                 dlogits = layer.backward(dlogits)
-            elif layer.__class__.__name__ == 'Flatten':
+            elif isinstance(layer, Flatten):
                 dlogits = layer.backward(dlogits)
-            elif layer.__class__.__name__ == 'Linear':
+            elif isinstance(layer, Linear):
                 dlogits, d_L_d_weights, d_L_d_bias = layer.backward(dlogits)
                 grads += [d_L_d_bias, d_L_d_weights]
+                layer.weight.grad = d_L_d_weights
+                layer.bias.grad = d_L_d_bias
         return grads[::-1]
 
 
@@ -133,7 +139,8 @@ class CrossEntropyLoss:
                  ):
         n_samples = y_pred.shape[0]
         log_likelihood = -torch.log(y_pred[range(n_samples), y_true])
-        return torch.sum(log_likelihood) / n_samples
+        self.out = torch.sum(log_likelihood) / n_samples
+        return self.out
 
     def backward(self,
                  y_pred: torch.Tensor,
@@ -169,7 +176,8 @@ class MaxPool2d:
     def __call__(self, X: torch.Tensor):
         self.X = X
         subM = self.prepare_submatrix(X)
-        return subM.max(dim=-1).values.max(dim=-1).values
+        self.out = subM.max(dim=-1).values.max(dim=-1).values
+        return self.out
 
     def add_padding(self, x: torch.Tensor, padding: int):
         padding = tuple(repeat(padding, 4))
@@ -275,8 +283,7 @@ class Conv2d:
         self.weights, self.bias = self.initialise_parameters()
 
     def initialise_parameters(self, bias: bool = True):
-        # return (torch.randn(self.out_channels, self.in_channels // self.groups, *self.kernel_size, requires_grad=True),
-        #         torch.zeros(self.out_channels,self.Oh, self.Ow, requires_grad=True) if not bias else torch.randn(self.out_channels,self.Oh, self.Ow, requires_grad=True))
+
         return (torch.randn(self.out_channels, self.in_channels // self.groups, *self.kernel_size, requires_grad=True),
                 torch.zeros(self.out_channels, requires_grad=True) if not bias else torch.randn(self.out_channels,
                                                                                                 requires_grad=True))
@@ -425,9 +432,11 @@ class Conv2d:
         self.Z = self.convolve(Xp, self.weights, self.stride, mode='front')
 
         if self.bias is not None:
-            return self.Z + self.bias.view(1, -1, 1, 1)  # sum should be done on the last layer
-
-        return self.Z
+            self.Z + self.bias.view(1, -1, 1, 1)  # sum should be done on the last layer
+            self.out = self.Z.clone()
+            return self.out
+        self.out = self.Z.clone()
+        return self.out
 
     def backward(self, dZ: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         Xp = self.padding_forward(self.X, self.kernel_size, self.stride)
@@ -438,40 +447,23 @@ class Conv2d:
         dZ_D = self.dilate2D(dZ, Dr=self.stride)
         dX = self.dZ_D_dX(dZ_D, ih, iw)
 
-        # Gradient K
+        # Gradient K k=kernel=weights=w
         _, _, Hd, Wd = dZ_D.shape
 
         ph = self.ih - Hd - self.kh + 1
         pw = self.iw - Wd - self.kw + 1
 
         dZ_Dp = self.padding_forward(dZ_D, self.kernel_size, self.stride, padding=(ph, pw))
-        self.dK = self.convolve(Xp, dZ_Dp, mode='param')
+        # self.dw = self.convolve(dZ_Dp, Xp, mode='param')
+        self.dw = self.convolve(Xp, dZ_Dp, mode='param')
 
         # gradient db
         self.db = torch.sum(dZ, dim=[0, 2, 3])
 
-        return dX, self.dK, self.db
+        return dX, self.dw, self.db
 
     def parameters(self):
         return [self.weights] + ([] if self.bias is None else [self.bias])
-
-
-class Optimizer:
-
-    def __init__(self, optimizer_type: str = None):
-        if optimizer_type is None:
-            self.optimizer_type = 'SGD'
-        else:
-            self.optimizer_type = optimizer_type
-
-    def SGD(self,
-            parameters: List[torch.Tensor],
-            grads: List[torch.Tensor],
-            momentum: int = 0.1,
-            lr: float = 0.1):
-        for p, grad in zip(parameters, grads):
-            p.data += -lr * grad
-        return parameters
 
 
 def dataset():
@@ -504,7 +496,7 @@ if __name__ == "__main__":
     device = 'cpu'
     print(torch.cuda.is_available())
     model = Sequential([
-        Conv2d(in_channels=3, out_channels=20, kernel_size=3, stride=1, padding=1, dilation=1),
+        Conv2d(in_channels=1, out_channels=20, kernel_size=3, stride=1, padding=1, dilation=1),
         Relu(),
         Conv2d(in_channels=20, out_channels=20, kernel_size=3, stride=1, padding=1, dilation=1),
         Relu(),
@@ -518,25 +510,29 @@ if __name__ == "__main__":
         Linear(fan_in=980,
                fan_out=10)
     ])
+
     loss = CrossEntropyLoss()
     losses = []
     parameters = model.parameters()
     print(sum(p.nelement() for p in parameters))  # number of parameters in total
     for p in parameters:
         p.requires_grad = True
+    optimizer = OptimizerSG(params=parameters, lr=0.1)
 
     train_loss, train_acc = 0.0, 0.0
-    for i in tqdm(range(100)):
+    for i in tqdm(range(10)):
         for batch, (X, y) in enumerate(train_dataloader):
             X, y = X.to(device), y.to(device)
             y_pred_logits = model(X)
             lossi = loss(y_pred_logits, y)
+            for layer in model.layers:
+                layer.out.retain_grad()
             for p in parameters:
                 p.grad = None
             grads = model.backward(y_pred_logits)
 
-            optimizer = Optimizer()
-            parameters = optimizer.SGD(parameters=parameters, grads=grads)
+            optimizer.step()
+
             losses.append(lossi)
             print(lossi.item())
 
