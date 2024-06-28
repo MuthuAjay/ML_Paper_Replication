@@ -1,8 +1,57 @@
 import torch
+import math
 from itertools import repeat
 from typing import Optional, List, Tuple
 from tqdm.auto import tqdm
+torch.manual_seed(42)
 
+def kaiming_uniform(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
+    fan = calculate_fan(tensor, mode)
+    gain = calculate_gain(nonlinearity, a)
+    std = gain / math.sqrt(fan)
+    bound = math.sqrt(3.0) * std
+    with torch.no_grad():
+        return tensor.uniform_(-bound, bound)
+
+
+def calculate_fan(tensor, mode='fan_in'):
+    dimensions = tensor.dim()
+    if dimensions < 2:
+        raise ValueError("Fan in and fan out can not be computed for tensor with fewer than 2 dimensions")
+
+    if dimensions == 2:  # Linear
+        fan_in = tensor.size(1)
+        fan_out = tensor.size(0)
+    else:
+        num_input_fmaps = tensor.size(1)
+        num_output_fmaps = tensor.size(0)
+        receptive_field_size = 1
+        if tensor.dim() > 2:
+            receptive_field_size = tensor[0][0].numel()
+        fan_in = num_input_fmaps * receptive_field_size
+        fan_out = num_output_fmaps * receptive_field_size
+
+    return fan_in if mode == 'fan_in' else fan_out
+
+
+def calculate_gain(nonlinearity, param=None):
+    linear_fns = ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d']
+    if nonlinearity in linear_fns or nonlinearity == 'sigmoid':
+        return 1
+    elif nonlinearity == 'tanh':
+        return 5.0 / 3
+    elif nonlinearity == 'relu':
+        return math.sqrt(2.0)
+    elif nonlinearity == 'leaky_relu':
+        if param is None:
+            negative_slope = 0.01
+        elif not isinstance(param, bool) and isinstance(param, int) or isinstance(param, float):
+            negative_slope = param
+        else:
+            raise ValueError("negative_slope {} not a valid number".format(param))
+        return math.sqrt(2.0 / (1 + negative_slope ** 2))
+    else:
+        raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
 class Relu:
 
@@ -283,10 +332,12 @@ class Conv2d:
         self.weights, self.bias = self.initialise_parameters()
 
     def initialise_parameters(self, bias: bool = True):
+        weights = torch.empty(self.out_channels, self.in_channels, *self.kernel_size, requires_grad=True)
+        weights = kaiming_uniform(weights, mode='fan_out', nonlinearity='relu')
+        bias = torch.zeros(self.out_channels, requires_grad=True) if not bias else torch.randn(self.out_channels,
+                                                                                                requires_grad=True)
 
-        return (torch.randn(self.out_channels, self.in_channels // self.groups, *self.kernel_size, requires_grad=True),
-                torch.zeros(self.out_channels, requires_grad=True) if not bias else torch.randn(self.out_channels,
-                                                                                                requires_grad=True))
+        return weights, bias
 
     def get_padding_dimensions(self,
                                input_shape: torch.Tensor.size,
