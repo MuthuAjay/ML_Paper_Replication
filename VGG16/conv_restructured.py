@@ -57,15 +57,18 @@ class Relu:
 
     def __call__(self,
                  X: torch.Tensor):
+        self.X = X
         self.out = torch.clamp(X, min=0)
         return self.out
 
     def backward(self,
                  dZ: torch.Tensor):
-        return (dZ > 0).float()
+        mask = (self.X > 0).float()
+        return dZ * mask
 
     def parameters(self):
         return []
+
 
 
 class Softmax:
@@ -483,7 +486,7 @@ class Conv2d:
         self.Z = self.convolve(Xp, self.weights, self.stride, mode='front')
 
         if self.bias is not None:
-            self.Z + self.bias.view(1, -1, 1, 1)  # sum should be done on the last layer
+            self.Z += self.bias.view(1, -1, 1, 1)  # sum should be done on the last layer
             self.out = self.Z.clone()
             return self.out
         self.out = self.Z.clone()
