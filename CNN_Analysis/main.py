@@ -37,7 +37,8 @@ if __name__ == "__main__":
     optimizer = OptimizerSG(params=parameters, lr=0.1)
     # print(parameters[0])
     train_loss, train_acc = 0.0, 0.0
-    for i in tqdm(range(10)):
+
+    for i in tqdm(range(1)):
         for batch, (X, y) in enumerate(train_dataloader):
             X, y = X.to(device), y.to(device)
             y_pred_logits = model(X)
@@ -46,12 +47,11 @@ if __name__ == "__main__":
                 layer.out.retain_grad()
             for p in parameters:
                 p.grad = None
-            # grads = model.backward(y_pred_logits)
+            grads = model.backward(y_pred_logits, y, loss)
+            lossi.backward()
             loss.backward(y_pred_logits, y)
             optimizer.step()
             train_acc = (y_pred_logits.argmax(dim=1) == y).sum().item() / len(y)
-
-            # optimizer.step()
 
             losses.append(lossi)
             # print(lossi.item())

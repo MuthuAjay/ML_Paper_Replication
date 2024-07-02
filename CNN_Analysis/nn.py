@@ -3,7 +3,7 @@ from typing import List, Tuple
 from conv_layer import Conv2d
 from activations import Relu
 from itertools import repeat
-
+from compare_grad import cmp
 
 class Flatten:
 
@@ -128,7 +128,7 @@ class Linear:
     def __call__(self,
                  X: torch.Tensor):
         self.last_input = X
-        self.out = X @ self.weight.T
+        self.out = X @ self.weight
         if self.bias is not None:
             self.out += self.bias
         return self.out
@@ -138,7 +138,7 @@ class Linear:
 
         d_L_d_weights = self.last_input.T @ d_L_d_out
         d_L_d_biases = torch.sum(d_L_d_out, dim=0)
-        d_L_d_input = d_L_d_out @ self.weight
+        d_L_d_input = d_L_d_out @ self.weight.T
 
         return d_L_d_input, d_L_d_weights, d_L_d_biases
 
@@ -161,18 +161,21 @@ class Sequential:
     def parameters(self):
         return [p for layer in self.layers for p in layer.parameters()]
 
-    def backward(self, logits):
+    def backward(self, logits, y, loss):
         dlogits = loss.backward(logits, y)
         grads = []
-        for layer in self.layers[::-1]:
+        for idx, layer in enumerate(self.layers[::-1]):
             if isinstance(layer, Conv2d):
                 dlogits, dconv_w, dconv_b = layer.backward(dlogits)
                 grads += [dconv_b, dconv_w]
-                layer.weights.grad = dconv_w
-                layer.bias.grad = dconv_b
+                print(layer.weights.grad, dconv_w.shape)
+                cmp(f'conv2d_{idx} weights',dconv_w, layer.weights)
+                cmp(f'conv2d_{idx} bias', dconv_b, layer.bias)
+                # layer.weights.grad = dconv_w
+                # layer.bias.grad = dconv_b
             elif isinstance(layer, Relu):
                 dlogits = layer.backward(dlogits)
-                layer.out.grad = dlogits
+                # layer.out.grad = dlogits
             elif isinstance(layer, MaxPool2d):
                 dlogits = layer.backward(dlogits)
             elif isinstance(layer, Flatten):
@@ -180,6 +183,6 @@ class Sequential:
             elif isinstance(layer, Linear):
                 dlogits, d_L_d_weights, d_L_d_bias = layer.backward(dlogits)
                 grads += [d_L_d_bias, d_L_d_weights]
-                layer.weight.grad = d_L_d_weights.T
-                layer.bias.grad = d_L_d_bias
+                # layer.weight.grad = d_L_d_weights
+                # layer.bias.grad = d_L_d_bias
         return grads[::-1]
