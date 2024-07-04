@@ -20,11 +20,11 @@ class Relu:
 class Sigmoid:
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
-        sel
-        return 1 / (1 + torch.exp(-x))
+        self.x = x
+        return 1 / (1 + torch.exp(-self.x))
 
     def backward(self, dz: torch.Tensor) -> torch.Tensor:
-        return self(dz) * (1 - self(dz))
+        return (self(self.x) * (1 - self(self.x))) * dz
 
 
 class Softmax:
