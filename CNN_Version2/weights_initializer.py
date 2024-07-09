@@ -1,4 +1,5 @@
 import math
+
 import torch
 
 
@@ -8,6 +9,7 @@ class WeightsInitializer:
                  shape,
                  initializer_type=None,
                  seed=None):
+        self.weights = None
         self.shape = shape
         if initializer_type is None:
             self.initializer_type = "he_normal"
@@ -67,8 +69,9 @@ class WeightsInitializer:
 
     def he_initializer(self, weights: torch.Tensor,
                        mode="fan_in", non_linearity='leaky_relu'):
-        self.kaiming_uniform(weights)
+        self.kaiming_uniform(weights, mode=mode, non_linearity=non_linearity)
 
-    def get_initializer(self, weights: torch.Tensor, mode="fan_in", non_linearity='leaky_relu'):
+    def get_initializer(self, mode="fan_in", non_linearity='leaky_relu'):
         if self.initializer_type == "he_normal":
-            return self.he_initializer(weights, mode, non_linearity)
+            self.weights = torch.empty(self.shape)
+            return self.he_initializer(self.weights, mode=mode, non_linearity=non_linearity)
