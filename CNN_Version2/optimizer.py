@@ -59,3 +59,12 @@ class Optimizer:
         den_b = torch.sqrt(Sdb_h) + self.epsilon
 
         return vdw_h / den_w, vdb_h / den_b
+
+    def get_optimization(self, dW, db, k):
+
+        if self.optimizer_type == 'sgd':
+            return self.SGD(dW, db, k)
+        if self.optimizer_type == 'adam':
+            return self.Adam(dW, db, k)
+        else:
+            raise ValueError("Valid optimizer options are only 'gd', 'sgd', 'rmsprop', and 'adam'.")
