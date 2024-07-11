@@ -23,6 +23,7 @@ class Conv2D:
                  seed=None,
                  input_shape=None
                  ):
+        self.X = None
         self.b = None
         self.k = None
         self.output_shape = None
@@ -112,9 +113,112 @@ class Conv2D:
             Xd_w = X
 
         if dh > 1:
-            Xd_h = torch.zeros((B, C, H + (H - 1) * (dh - 1),Xd_w.shape[-1]), dtype=X.dtype, device=X.device)
-            Xd_h[:,:,::dh,:] = Xd_w
+            Xd_h = torch.zeros((B, C, H + (H - 1) * (dh - 1), Xd_w.shape[-1]), dtype=X.dtype, device=X.device)
+            Xd_h[:, :, ::dh, :] = Xd_w
         else:
             Xd_h = Xd_w
 
         return Xd_h
+
+    def prepare_subMatrix(self, X: torch.Tensor, Kh: int, Kw: int, s):
+        B, C, Nh, Nw = X.shape
+        sh, sw = s
+
+        Oh = (Nh - Kh) // sh + 1
+        Ow = (Nw - Kw) // sw + 1
+
+        strides = (C * Nh * Nw, Nw * Nh, Nw * sh, sw, Nw, 1)
+        subM = torch.as_strided(X,
+                                size=(B, C, Oh, Ow, Kh, Kw),
+                                stride=strides)
+        return subM
+
+    def convolve(self, X: torch.Tensor, K: torch.Tensor, s: Tuple = (1, 1), mode: str = 'back'):
+        B, Kc, Kh, Kw = K.shape
+        subM = self.prepare_subMatrix(X, Kh, Kw, s)
+        if mode == 'front':
+            return torch.einsum('fckl,bcijkl->bfij', K, subM)
+        elif mode == 'back':
+            return torch.einsum('fdkl,bcijkl->bdij', K, subM)
+        elif mode == 'param':
+            return torch.einsum('bfkl,bcijkl->fcij', K, subM)
+
+    def dZ_D_dX(self, dZ_D: torch.Tensor, ih: int, iw: int) -> torch.Tensor:
+        _, _, Hd, Wd = dZ_D.shape
+        ph = ih - Hd + self.kh - 1
+        pw = iw - Wd + self.kw - 1
+
+        padding_back = Padding(p=(ph, pw))
+        dZ_Dp = padding_back.forward(dZ_D, self.kernel_size, self.s)
+        k_rotated = self.k.flip([2, 3])
+        dXp = self.convolve(dZ_Dp, k_rotated, mode='back')
+        dX = self.padding.backward(dXp)
+
+        return dX
+
+    def forward(self, X):
+        # padding
+
+        self.X = X
+
+        Xp = self.padding.forward(X, self.kernel_size, self.s)
+
+        # convolve Xp with K
+        Z = self.convolve(Xp, self.k, self.s) + self.b
+
+        a = self.activation(Z)
+
+        return a
+
+    def backpropagation(self, da):
+
+        Xp = self.padding.forward(self.X, self.kernel_size, self.s)
+
+        m, Nc, Nh, Nw = Xp.shape
+
+        dZ = self.activation.backward(da)
+
+        # Dilate dZ (dZ-> dZ_D)
+
+        dZ_D = self.dilate2D(dZ, Dr=self.s)
+
+        dX = self.dZ_D_dX(dZ_D, Nh, Nw)
+
+        # Gradient dK
+
+        _, _, Hd, Wd = dZ_D.shape
+
+        ph = self.Nh - Hd - self.kh + 1
+        pw = self.Nw - Wd - self.kw + 1
+
+        padding_back = Padding(p=(ph, pw))
+
+        dZ_Dp = padding_back.forward(dZ_D, self.kernel_size, self.s)
+
+        self.dK = self.convolve(Xp, dZ_Dp, mode='param')
+
+        # Gradient db
+
+        self.db = torch.sum(dZ, dim=0)
+
+        return dX
+
+    def update(self, lr, m, k):
+        '''
+        Parameters:
+
+        lr: learning rate
+        m: batch_size (sumber of samples in batch)
+        k: iteration_number
+        '''
+        dK, db = self.optimizer.get_optimization(self.dK, self.db, k)
+
+        if self.kernel_regularizer[0].lower() == 'l2':
+            dK += self.kernel_regularizer[1] * self.K
+        elif self.weight_regularizer[0].lower() == 'l1':
+            dK += self.kernel_regularizer[1] * torch.sign(self.K)
+
+        self.k -= self.dK * (lr / m)
+
+        if self.use_bias:
+            self.b -= self.db * (lr / m)
