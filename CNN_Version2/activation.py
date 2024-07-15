@@ -8,7 +8,7 @@ class Relu:
         self.out = torch.clamp(x, min=0)
         return self.out
 
-    def backward(self,
+    def backpropagation(self,
                  dz: torch.Tensor) -> torch.Tensor:
         x = (self.X > 0).float()
         return dz * x
@@ -36,3 +36,6 @@ class Softmax:
 
     def parameters(self):
         return []
+
+    def backpropagation(self):
+        pass

@@ -61,7 +61,7 @@ class Padding:
         Xp = torch.concat((X, zeros_r), dim=3)
         Xp = torch.concat((zeros_l, Xp), dim=3)
         Xp = torch.concat((zeros_t, Xp), dim=2)
-        Xp = torch.concat((X, zeros_b), dim=2)
+        Xp = torch.concat((Xp, zeros_b), dim=2)
 
         return Xp
 

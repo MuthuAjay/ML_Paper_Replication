@@ -56,6 +56,7 @@ class Conv2D:
         self.activation_type = activation_type
         if self.activation_type == "relu":
             self.activation = Relu()
+
         self.use_bias = use_bias
         self.weight_initializer_type = weight_initializer_type
         if kernel_regularizer is None:

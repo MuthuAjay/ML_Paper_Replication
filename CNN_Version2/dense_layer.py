@@ -1,4 +1,5 @@
 import torch
+from CNN_Version2.activation import *
 from weights_initializer import WeightsInitializer
 from optimizer import Optimizer
 
@@ -20,7 +21,10 @@ class Dense:
         self.b = None
         self.W = None
         self.out_features = out_features
-        self.activation = activation_type
+        if activation_type == "relu":
+            self.activation = Relu()
+        elif activation_type == 'softmax':
+            self.activation = Softmax()
         self.use_bias = use_bias
         self.weight_initializer = weight_initializer
         if weight_regularizer is None:
@@ -51,7 +55,7 @@ class Dense:
         a = self.activation(self.Z)
         return a
 
-    def backward(self,
+    def backpropagation(self,
                  da: torch.Tensor):
         dz = self.activation.backward(da)
         dr = dz.clone()
