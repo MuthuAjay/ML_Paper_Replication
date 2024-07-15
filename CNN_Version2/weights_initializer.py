@@ -69,7 +69,7 @@ class WeightsInitializer:
 
     def he_initializer(self, weights: torch.Tensor,
                        mode="fan_in", non_linearity='leaky_relu'):
-        self.kaiming_uniform(weights, mode=mode, non_linearity=non_linearity)
+        return self.kaiming_uniform(weights, mode=mode, non_linearity=non_linearity)
 
     def get_initializer(self, mode="fan_in", non_linearity='leaky_relu'):
         if self.initializer_type == "he_normal":
