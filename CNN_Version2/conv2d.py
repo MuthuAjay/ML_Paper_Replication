@@ -215,9 +215,9 @@ class Conv2D:
         dK, db = self.optimizer.get_optimization(self.dK, self.db, k)
 
         if self.kernel_regularizer[0].lower() == 'l2':
-            dK += self.kernel_regularizer[1] * self.K
+            dK += self.kernel_regularizer[1] * self.k
         elif self.weight_regularizer[0].lower() == 'l1':
-            dK += self.kernel_regularizer[1] * torch.sign(self.K)
+            dK += self.kernel_regularizer[1] * torch.sign(self.k)
 
         self.k -= self.dK * (lr / m)
 

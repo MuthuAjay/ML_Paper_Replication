@@ -8,7 +8,7 @@ class Relu:
         self.out = torch.clamp(x, min=0)
         return self.out
 
-    def backpropagation(self,
+    def backward(self,
                  dz: torch.Tensor) -> torch.Tensor:
         x = (self.X > 0).float()
         return dz * x

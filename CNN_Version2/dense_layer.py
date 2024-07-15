@@ -57,7 +57,8 @@ class Dense:
 
     def backpropagation(self,
                  da: torch.Tensor):
-        dz = self.activation.backward(da)
+        # dz = self.activation.backward(da)
+        dz = da.clone()
         dr = dz.clone()
         self.db = torch.sum(dz, dim=0).view(-1, 1)
         self.dW = self.X.T @ dr

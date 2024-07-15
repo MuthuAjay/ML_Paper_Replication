@@ -18,6 +18,6 @@ def dataset():
         transform=Compose([ToTensor()])
     )
 
-    traindataloader = DataLoader(training_data, batch_size=64, shuffle=False, sampler=SubsetRandomSampler(range(100)))
-    testdataloader = DataLoader(test_data, batch_size=64, shuffle=False, sampler=SubsetRandomSampler(range(20)))
+    traindataloader = DataLoader(training_data, batch_size=4, shuffle=False, sampler=SubsetRandomSampler(range(100)))
+    testdataloader = DataLoader(test_data, batch_size=4, shuffle=False, sampler=SubsetRandomSampler(range(20)))
     return traindataloader, testdataloader

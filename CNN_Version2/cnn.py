@@ -210,9 +210,9 @@ class CNN:
             cost_train /= num_batches
 
             # printing purpose only (Training Accuracy, Validation loss and accuracy)
-
-            text = 'Training Loss: ' + str(round(cost_train, 4)) + ' - '
-            self.history['Training Loss'].append(cost_train)
+            print(cost_train)
+            text = 'Training Loss: ' + str(round(cost_train.item(), 4)) + ' - '
+            self.history['Training Loss'].append(cost_train.item())
 
             # training accuracy
 
@@ -221,8 +221,8 @@ class CNN:
                 text += 'Training Accuracy: ' + str(round(train_acc, 4))
                 self.history['Training Accuracy'].append(train_acc)
             else:
-                text += 'Training Accuracy: ' + str(round(cost_train, 4))
-                self.history['Training Accuracy'].append(cost_train)
+                text += 'Training Accuracy: ' + str(round(cost_train.item(), 4))
+                self.history['Training Accuracy'].append(cost_train.item())
 
             if X_val is not None:
                 cost_val, accuracy_val = self.evaluate(X_val, y_val, batch_size)
